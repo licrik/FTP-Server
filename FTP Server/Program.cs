@@ -13,8 +13,14 @@ namespace FTP_Server
     {
         public static event Action<string> data_Event;
         public static event Action<string> user_Event;
+        public static event Action<string> bitrate_Event;
         private static FtpServer server;
         private static bool work;
+
+        public static void BitrateSend(string message)
+        {
+            if (bitrate_Event != null) bitrate_Event(message);
+        }
 
         /// <summary>
         /// Отправка сообщения о действиях пользователя

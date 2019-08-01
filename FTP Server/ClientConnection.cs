@@ -7,6 +7,7 @@ using System.Net.Security;
 using System.Net.Sockets;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace FTP_Server
@@ -21,8 +22,21 @@ namespace FTP_Server
             public string Arguments { get; set; }
         }
 
+        private static bool operationStatus = false;
+        private static int byteCount;
+
+        private static void BitrateCalculate(object user)
+        {
+            while(operationStatus)
+            {
+                Program.BitrateSend((user as User).Identification + " | " + byteCount.ToString());
+                byteCount = 0;
+                System.Threading.Thread.Sleep(1000);
+            }
+        }
+
         #region Copy Stream Implementations
-        private static long CopyStream(Stream input, Stream output, int bufferSize)
+        private static long CopyStream(Stream input, Stream output, int bufferSize, User user)
         {
             byte[] buffer = new byte[bufferSize];
             int count = 0;
@@ -32,12 +46,14 @@ namespace FTP_Server
             {
                 output.Write(buffer, 0, count);
                 total += count;
+                byteCount += count;
             }
+            operationStatus = false;
 
             return total;
         }
 
-        private static long CopyStreamAscii(Stream input, Stream output, int bufferSize)
+        private static long CopyStreamAscii(Stream input, Stream output, int bufferSize, User user)
         {
             char[] buffer = new char[bufferSize];
             int count = 0;
@@ -51,24 +67,30 @@ namespace FTP_Server
                     {
                         wtr.Write(buffer, 0, count);
                         total += count;
+                        byteCount += count;
                     }
                 }
             }
+            operationStatus = false;
 
             return total;
         }
 
-        private long CopyStream(Stream input, Stream output)
+        private long CopyStream(Stream input, Stream output, User user)
         {
             Stream limitedStream = output; // new RateLimitingStream(output, 131072, 0.5);
+            //
+            Thread thread = new Thread(new ParameterizedThreadStart(BitrateCalculate));
+            thread.Start(user);
+            operationStatus = true;
 
             if (_connectionType == TransferType.Image)
             {
-                return CopyStream(input, limitedStream, 4096);
+                return CopyStream(input, limitedStream, 4096, user);
             }
             else
             {
-                return CopyStreamAscii(input, limitedStream, 4096);
+                return CopyStreamAscii(input, limitedStream, 4096, user);
             }
         }
         #endregion
@@ -923,7 +945,7 @@ namespace FTP_Server
 
             using (FileStream fs = new FileStream(pathname, FileMode.Open, FileAccess.Read))
             {
-                bytes = CopyStream(fs, dataStream);
+                bytes = CopyStream(fs, dataStream, _currentUser);
             }
 
             Program.DataSender("Finish download " + pathname);
@@ -937,7 +959,7 @@ namespace FTP_Server
 
             using (FileStream fs = new FileStream(pathname, FileMode.OpenOrCreate, FileAccess.Write, FileShare.None, 4096, FileOptions.SequentialScan))
             {
-                bytes = CopyStream(dataStream, fs);
+                bytes = CopyStream(dataStream, fs, _currentUser);
             }
 
             return "226 Closing data connection, file transfer successful";
@@ -949,7 +971,7 @@ namespace FTP_Server
 
             using (FileStream fs = new FileStream(pathname, FileMode.Append, FileAccess.Write, FileShare.None, 4096, FileOptions.SequentialScan))
             {
-                bytes = CopyStream(dataStream, fs);
+                bytes = CopyStream(dataStream, fs, _currentUser);
             }
 
             return "226 Closing data connection, file transfer successful";
